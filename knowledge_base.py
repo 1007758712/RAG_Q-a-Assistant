@@ -1,0 +1,93 @@
+import os
+from datetime import datetime
+from langchain_community.embeddings import DashScopeEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import config_data as config
+import hashlib
+from langchain_chroma import Chroma
+import os
+import dotenv
+dotenv.load_dotenv()
+
+def check_md5(md5_str:str):
+    #检查传入md5是否已经被处理了
+
+    if not os.path.exists(config.md5_path):
+        open(config.md5_path,'w',encoding='utf-8').close()
+        return False
+    else:
+        for line in open(config.md5_path,'r',encoding='utf-8').readlines():
+            line = line.strip()
+            if line == md5_str:
+                return True
+        return False
+
+
+
+def save_md5(md5_str:str):
+    with open(config.md5_path,'a',encoding='utf-8')as f:
+        f.write(md5_str + '\n')
+
+
+
+def get_string_md5(input_str:str,encoding='utf-8'):
+    """将传入的字符串转换为md5字符串"""
+    str_bytes = input_str.encode(encoding=encoding)
+
+    md5_obj=hashlib.md5()
+    md5_obj.update(str_bytes)
+    md5_hex = md5_obj.hexdigest()
+
+    return md5_hex
+
+
+
+
+class KnowledgeBaseService(object):
+    def __init__(self):
+        os.makedirs(config.persist_directory,exist_ok=True)
+        self.chroma=Chroma(
+            collection_name=config.collection_name,   #表名
+            embedding_function=DashScopeEmbeddings(model="text-embedding-v4",
+                                                   dashscope_api_key=os.getenv("OPENAI_API_KEY")
+                                                   ),   #
+            persist_directory=config.persist_directory,   #数据库本地存储文件夹
+        )   #向量库
+        self.spliter = RecursiveCharacterTextSplitter(
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap,
+            separators=config.separators,
+            length_function=len,
+        )
+    def upload_by_str(self,data:str,filename):
+        """将传入的字符串进行向量化，存入向量数据库中"""
+        md5_hex=get_string_md5(data)
+
+        if check_md5(md5_hex):
+            return "[跳过]文件重复上传"
+        if len(data) > config.max_split_char_number:
+            Knowledge_chunks: list[str] = self.spliter.split_text(data)
+        else:
+            Knowledge_chunks = [data]
+
+        metadata={
+            "sourse":filename,
+            "create_time":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "operator":"xiaoli"
+        }
+        self.chroma.add_texts(
+            Knowledge_chunks,
+            metadatas=[metadata for _ in Knowledge_chunks],
+        )
+        save_md5(md5_hex)
+
+        return "save success"
+
+
+if __name__== '__main__':
+
+    service=KnowledgeBaseService()
+    r1=service.upload_by_str("zhou阿斯顿法国红酒1看来现场v帮会就","testfile")
+
+
+    print(r1)
